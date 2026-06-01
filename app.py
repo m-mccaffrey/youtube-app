@@ -30,7 +30,7 @@ def index():
 def videos():
     conn = get_db()
     rows = conn.execute(
-        "SELECT id, title, channel, duration, thumbnail, published_at FROM videos ORDER BY id"
+        "SELECT id, title, channel, duration, thumbnail, published_at FROM videos WHERE embeddable = 1 ORDER BY id"
     ).fetchall()
     conn.close()
 

@@ -24,16 +24,22 @@ def get_db():
 def init_db(conn):
     conn.execute("""
         CREATE TABLE IF NOT EXISTS videos (
-            id          TEXT PRIMARY KEY,
-            title       TEXT,
-            channel     TEXT,
-            description TEXT,
-            duration    TEXT,
-            thumbnail   TEXT,
-            tags        TEXT,
-            published_at TEXT
+            id           TEXT PRIMARY KEY,
+            title        TEXT,
+            channel      TEXT,
+            description  TEXT,
+            duration     TEXT,
+            thumbnail    TEXT,
+            tags         TEXT,
+            published_at TEXT,
+            embeddable   INTEGER NOT NULL DEFAULT 1
         )
     """)
+    # Add column to existing DBs that predate this field
+    try:
+        conn.execute("ALTER TABLE videos ADD COLUMN embeddable INTEGER NOT NULL DEFAULT 1")
+    except Exception:
+        pass
     conn.commit()
 
 
@@ -62,13 +68,13 @@ def fetch_playlist_video_ids(youtube, playlist_id):
 
 
 def fetch_video_details(youtube, video_ids):
-    """Fetch snippet + contentDetails for a list of video IDs (batched 50 at a time)."""
+    """Fetch snippet, contentDetails, and status for a list of video IDs (batched 50 at a time)."""
     details = {}
 
     for i in range(0, len(video_ids), 50):
         batch = video_ids[i : i + 50]
         resp = youtube.videos().list(
-            part="snippet,contentDetails",
+            part="snippet,contentDetails,status",
             id=",".join(batch),
             maxResults=50,
         ).execute()
@@ -77,6 +83,7 @@ def fetch_video_details(youtube, video_ids):
             vid_id = item["id"]
             snippet = item.get("snippet", {})
             content = item.get("contentDetails", {})
+            status  = item.get("status", {})
 
             thumbnails = snippet.get("thumbnails", {})
             thumbnail = (
@@ -96,6 +103,7 @@ def fetch_video_details(youtube, video_ids):
                 "thumbnail": thumbnail,
                 "tags": json.dumps(snippet.get("tags") or []),
                 "published_at": snippet.get("publishedAt", ""),
+                "embeddable": 1 if status.get("embeddable", True) else 0,
             }
 
     return details
@@ -104,8 +112,8 @@ def fetch_video_details(youtube, video_ids):
 def upsert_videos(conn, videos):
     conn.executemany(
         """
-        INSERT INTO videos (id, title, channel, description, duration, thumbnail, tags, published_at)
-        VALUES (:id, :title, :channel, :description, :duration, :thumbnail, :tags, :published_at)
+        INSERT INTO videos (id, title, channel, description, duration, thumbnail, tags, published_at, embeddable)
+        VALUES (:id, :title, :channel, :description, :duration, :thumbnail, :tags, :published_at, :embeddable)
         ON CONFLICT(id) DO UPDATE SET
             title        = excluded.title,
             channel      = excluded.channel,
@@ -113,7 +121,8 @@ def upsert_videos(conn, videos):
             duration     = excluded.duration,
             thumbnail    = excluded.thumbnail,
             tags         = excluded.tags,
-            published_at = excluded.published_at
+            published_at = excluded.published_at,
+            embeddable   = excluded.embeddable
         """,
         videos,
     )
@@ -138,12 +147,16 @@ def main():
     details = fetch_video_details(youtube, video_ids)
     print(f"  Got details for {len(details)} videos.")
 
+    embeddable = [v for v in details.values() if v["embeddable"]]
+    skipped    = len(details) - len(embeddable)
+
     conn = get_db()
     init_db(conn)
-    upsert_videos(conn, list(details.values()))
+    upsert_videos(conn, embeddable)
     conn.close()
 
-    print(f"Done. {len(details)} videos written to {DB_PATH}")
+    print(f"Done. {len(embeddable)} embeddable videos written to {DB_PATH}"
+          + (f" ({skipped} skipped — embedding disabled)" if skipped else ""))
 
 
 if __name__ == "__main__":
