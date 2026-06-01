@@ -153,6 +153,7 @@
   let index = 0;
   let player = null;
   let started = false;
+  let advancing = false;   // guard against concurrent advances
 
   // ─── Fisher-Yates shuffle ───────────────────────────────────────────────────
   function shuffle(arr) {
@@ -197,12 +198,17 @@
   }
 
   // ─── Advance to next video ──────────────────────────────────────────────────
-  function playNext() {
-    index = (index + 1) % playlist.length;
-    // Reshuffle when we loop back to start
-    if (index === 0) shuffle(playlist);
-    updateInfoBar();
-    player.loadVideoById(playlist[index].id);
+  function playNext(delay = 0) {
+    if (advancing) return;
+    advancing = true;
+    setTimeout(() => {
+      index = (index + 1) % playlist.length;
+      if (index === 0) shuffle(playlist);
+      updateInfoBar();
+      player.loadVideoById(playlist[index].id);
+      // Release the guard after the player has had time to react
+      setTimeout(() => { advancing = false; }, 1500);
+    }, delay);
   }
 
   // ─── YouTube IFrame API ready callback ──────────────────────────────────────
@@ -229,16 +235,15 @@
   }
 
   function onStateChange(event) {
-    // YT.PlayerState.ENDED === 0
     if (event.data === YT.PlayerState.ENDED) {
       playNext();
     }
   }
 
   function onError(event) {
-    // Skip unplayable videos (101, 150 = embedding disabled; 100 = not found)
-    console.warn("Player error", event.data, "— skipping");
-    playNext();
+    // 100 = not found, 101/150 = embedding disabled
+    console.warn("Player error", event.data, "— skipping in 2s");
+    playNext(2000);
   }
 
   // ─── Start overlay click ────────────────────────────────────────────────────
@@ -253,8 +258,8 @@
   // ─── Skip button ────────────────────────────────────────────────────────────
   document.getElementById("skip-btn").addEventListener("click", () => {
     if (!playlist.length || !player) return;
+    advancing = false;   // user-initiated skip overrides any cooldown
     playNext();
-    if (started) player.playVideo();
   });
 
   // ─── Boot: load playlist then inject YT API script ──────────────────────────
