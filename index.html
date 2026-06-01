@@ -1,0 +1,285 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>TV</title>
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    body {
+      background: #0a0a0a;
+      color: #e0e0e0;
+      font-family: system-ui, sans-serif;
+      height: 100dvh;
+      display: flex;
+      flex-direction: column;
+      overflow: hidden;
+    }
+
+    #player-wrap {
+      position: relative;
+      flex: 1 1 0;
+      background: #000;
+    }
+
+    #player-wrap iframe {
+      position: absolute;
+      inset: 0;
+      width: 100%;
+      height: 100%;
+      border: none;
+    }
+
+    /* Overlay shown before first play */
+    #start-overlay {
+      position: absolute;
+      inset: 0;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      background: rgba(0,0,0,0.72);
+      gap: 1.2rem;
+      z-index: 10;
+      cursor: pointer;
+    }
+
+    #start-overlay.hidden { display: none; }
+
+    #start-overlay svg {
+      width: 80px;
+      height: 80px;
+      fill: #fff;
+      opacity: 0.9;
+    }
+
+    #start-overlay p {
+      font-size: 1.1rem;
+      opacity: 0.7;
+      letter-spacing: 0.03em;
+    }
+
+    /* Info bar at the bottom */
+    #info-bar {
+      flex: 0 0 auto;
+      background: #111;
+      border-top: 1px solid #222;
+      padding: 0.55rem 1rem;
+      display: flex;
+      align-items: center;
+      gap: 1.2rem;
+      min-height: 52px;
+    }
+
+    #thumb {
+      width: 64px;
+      height: 36px;
+      object-fit: cover;
+      border-radius: 3px;
+      flex-shrink: 0;
+      background: #222;
+    }
+
+    #meta {
+      flex: 1;
+      overflow: hidden;
+    }
+
+    #now-title {
+      font-size: 0.95rem;
+      font-weight: 600;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+
+    #now-channel {
+      font-size: 0.78rem;
+      color: #888;
+      margin-top: 2px;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+
+    #counter {
+      font-size: 0.75rem;
+      color: #555;
+      flex-shrink: 0;
+      white-space: nowrap;
+    }
+
+    #skip-btn {
+      background: #222;
+      border: none;
+      color: #aaa;
+      font-size: 0.78rem;
+      padding: 0.35rem 0.75rem;
+      border-radius: 4px;
+      cursor: pointer;
+      flex-shrink: 0;
+      transition: background 0.15s, color 0.15s;
+    }
+    #skip-btn:hover { background: #333; color: #fff; }
+  </style>
+</head>
+<body>
+
+<div id="player-wrap">
+  <div id="yt-player"></div>
+
+  <div id="start-overlay">
+    <svg viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
+      <path d="M8 5v14l11-7z"/>
+    </svg>
+    <p>Click to start your personal TV channel</p>
+  </div>
+</div>
+
+<div id="info-bar">
+  <img id="thumb" src="" alt="" />
+  <div id="meta">
+    <div id="now-title">Loading playlist…</div>
+    <div id="now-channel"></div>
+  </div>
+  <div id="counter"></div>
+  <button id="skip-btn">Skip &#8594;</button>
+</div>
+
+<script>
+  // ─── State ──────────────────────────────────────────────────────────────────
+  let playlist = [];   // shuffled video objects
+  let index = 0;
+  let player = null;
+  let started = false;
+
+  // ─── Fisher-Yates shuffle ───────────────────────────────────────────────────
+  function shuffle(arr) {
+    for (let i = arr.length - 1; i > 0; i--) {
+      const j = Math.floor(Math.random() * (i + 1));
+      [arr[i], arr[j]] = [arr[j], arr[i]];
+    }
+    return arr;
+  }
+
+  // ─── Parse ISO 8601 duration to human string ────────────────────────────────
+  function parseDuration(iso) {
+    if (!iso) return "";
+    const m = iso.match(/PT(?:(\d+)H)?(?:(\d+)M)?(?:(\d+)S)?/);
+    if (!m) return "";
+    const h = parseInt(m[1] || 0);
+    const min = parseInt(m[2] || 0);
+    const s = parseInt(m[3] || 0);
+    if (h > 0) return `${h}:${String(min).padStart(2,"0")}:${String(s).padStart(2,"0")}`;
+    return `${min}:${String(s).padStart(2,"0")}`;
+  }
+
+  // ─── Update info bar ────────────────────────────────────────────────────────
+  function updateInfoBar() {
+    const video = playlist[index];
+    if (!video) return;
+
+    const dur = parseDuration(video.duration);
+    document.getElementById("now-title").textContent =
+      video.title + (dur ? `  [${dur}]` : "");
+    document.getElementById("now-channel").textContent = video.channel;
+    document.getElementById("counter").textContent =
+      `${index + 1} / ${playlist.length}`;
+
+    const thumb = document.getElementById("thumb");
+    if (video.thumbnail) {
+      thumb.src = video.thumbnail;
+      thumb.style.display = "block";
+    } else {
+      thumb.style.display = "none";
+    }
+  }
+
+  // ─── Advance to next video ──────────────────────────────────────────────────
+  function playNext() {
+    index = (index + 1) % playlist.length;
+    // Reshuffle when we loop back to start
+    if (index === 0) shuffle(playlist);
+    updateInfoBar();
+    player.loadVideoById(playlist[index].id);
+  }
+
+  // ─── YouTube IFrame API ready callback ──────────────────────────────────────
+  window.onYouTubeIframeAPIReady = function () {
+    player = new YT.Player("yt-player", {
+      width: "100%",
+      height: "100%",
+      playerVars: {
+        autoplay: 0,
+        controls: 1,
+        rel: 0,
+        modestbranding: 1,
+      },
+      events: {
+        onReady: onPlayerReady,
+        onStateChange: onStateChange,
+        onError: onError,
+      },
+    });
+  };
+
+  function onPlayerReady() {
+    // Player is ready; waiting for user click on start overlay
+  }
+
+  function onStateChange(event) {
+    // YT.PlayerState.ENDED === 0
+    if (event.data === YT.PlayerState.ENDED) {
+      playNext();
+    }
+  }
+
+  function onError(event) {
+    // Skip unplayable videos (101, 150 = embedding disabled; 100 = not found)
+    console.warn("Player error", event.data, "— skipping");
+    playNext();
+  }
+
+  // ─── Start overlay click ────────────────────────────────────────────────────
+  document.getElementById("start-overlay").addEventListener("click", () => {
+    if (!playlist.length || !player) return;
+    started = true;
+    document.getElementById("start-overlay").classList.add("hidden");
+    player.loadVideoById(playlist[index].id);
+    player.playVideo();
+  });
+
+  // ─── Skip button ────────────────────────────────────────────────────────────
+  document.getElementById("skip-btn").addEventListener("click", () => {
+    if (!playlist.length || !player) return;
+    playNext();
+    if (started) player.playVideo();
+  });
+
+  // ─── Boot: load playlist then inject YT API script ──────────────────────────
+  fetch("/videos")
+    .then(r => r.json())
+    .then(videos => {
+      if (!videos.length) {
+        document.getElementById("now-title").textContent =
+          "No videos found — run refresh.py first.";
+        return;
+      }
+      playlist = shuffle(videos);
+      index = 0;
+      updateInfoBar();
+
+      // Inject YouTube IFrame API
+      const tag = document.createElement("script");
+      tag.src = "https://www.youtube.com/iframe_api";
+      document.head.appendChild(tag);
+    })
+    .catch(err => {
+      document.getElementById("now-title").textContent =
+        "Could not reach /videos endpoint.";
+      console.error(err);
+    });
+</script>
+</body>
+</html>
