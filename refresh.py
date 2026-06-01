@@ -126,38 +126,43 @@ def upsert_videos(conn, videos):
         """,
         videos,
     )
+    conn.execute("DELETE FROM videos WHERE embeddable = 0")
     conn.commit()
 
 
 def main():
-    if not API_KEY:
+    api_key     = os.environ.get("YOUTUBE_API_KEY", "")
+    playlist_id = os.environ.get("YOUTUBE_PLAYLIST_ID", "")
+
+    if not api_key:
         print("Error: YOUTUBE_API_KEY environment variable not set.", file=sys.stderr)
-        sys.exit(1)
-    if not PLAYLIST_ID:
+        return False
+    if not playlist_id:
         print("Error: YOUTUBE_PLAYLIST_ID environment variable not set.", file=sys.stderr)
-        sys.exit(1)
+        return False
 
-    youtube = build("youtube", "v3", developerKey=API_KEY)
+    youtube = build("youtube", "v3", developerKey=api_key)
 
-    print(f"Fetching playlist {PLAYLIST_ID} ...")
-    video_ids = fetch_playlist_video_ids(youtube, PLAYLIST_ID)
+    print(f"Fetching playlist {playlist_id} ...")
+    video_ids = fetch_playlist_video_ids(youtube, playlist_id)
     print(f"  Found {len(video_ids)} videos in playlist.")
 
     print("Fetching video details ...")
     details = fetch_video_details(youtube, video_ids)
     print(f"  Got details for {len(details)} videos.")
 
-    embeddable = [v for v in details.values() if v["embeddable"]]
-    skipped    = len(details) - len(embeddable)
-
     conn = get_db()
     init_db(conn)
-    upsert_videos(conn, embeddable)
+    upsert_videos(conn, list(details.values()))
     conn.close()
 
-    print(f"Done. {len(embeddable)} embeddable videos written to {DB_PATH}"
-          + (f" ({skipped} skipped — embedding disabled)" if skipped else ""))
+    embeddable = sum(1 for v in details.values() if v["embeddable"])
+    skipped    = len(details) - embeddable
+    print(f"Done. {embeddable} embeddable videos in {DB_PATH}"
+          + (f" ({skipped} removed — embedding disabled)" if skipped else ""))
+    return True
 
 
 if __name__ == "__main__":
-    main()
+    if not main():
+        sys.exit(1)

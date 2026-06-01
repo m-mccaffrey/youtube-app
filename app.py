@@ -3,10 +3,10 @@ app.py — Flask server for the YouTube shuffle TV channel.
 Run: python app.py
 """
 
-import json
 import os
 import sqlite3
 
+import refresh
 from flask import Flask, jsonify, send_from_directory
 
 DB_PATH = os.path.join(os.path.dirname(__file__), "db.sqlite")
@@ -49,4 +49,7 @@ def videos():
 
 
 if __name__ == "__main__":
+    print("--- Syncing playlist ---")
+    refresh.main()
+    print("--- Starting server ---")
     app.run(host="0.0.0.0", port=5000, debug=False)
