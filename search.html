@@ -75,6 +75,26 @@
     textarea:focus { border-color: #444; }
     textarea::placeholder { color: #444; }
 
+    #search-controls {
+      display: flex;
+      flex-direction: column;
+      gap: 0.5rem;
+      align-items: stretch;
+    }
+
+    #suffix-select {
+      background: #161616;
+      border: 1px solid #2a2a2a;
+      border-radius: 6px;
+      color: #aaa;
+      font-family: inherit;
+      font-size: 0.8rem;
+      padding: 0.45rem 0.7rem;
+      outline: none;
+      cursor: pointer;
+    }
+    #suffix-select:focus { border-color: #444; }
+
     #search-btn {
       background: #222;
       border: 1px solid #333;
@@ -242,8 +262,18 @@
 </header>
 
 <div id="search-panel">
-  <textarea id="terms-input" placeholder="Radiohead&#10;Jeff Buckley - Hallelujah&#10;Portishead live&#10;Massive Attack"></textarea>
-  <button id="search-btn">Search</button>
+  <textarea id="terms-input" placeholder="Radiohead&#10;Jeff Buckley - Hallelujah&#10;Portishead&#10;Massive Attack"></textarea>
+  <div id="search-controls">
+    <select id="suffix-select" title="Appended to every search term">
+      <option value="live performance">+ live performance</option>
+      <option value="live">+ live</option>
+      <option value="live concert">+ live concert</option>
+      <option value="acoustic live">+ acoustic live</option>
+      <option value="NPR Tiny Desk">+ NPR Tiny Desk</option>
+      <option value="">no suffix</option>
+    </select>
+    <button id="search-btn">Search</button>
+  </div>
 </div>
 
 <div id="spinner">Searching…</div>
@@ -305,6 +335,7 @@
     const terms = document.getElementById("terms-input").value;
     if (!terms.trim()) return;
 
+    const suffix = document.getElementById("suffix-select").value;
     const btn = document.getElementById("search-btn");
     const spinner = document.getElementById("spinner");
     const resultsEl = document.getElementById("results");
@@ -317,7 +348,7 @@
       const data = await fetch("/api/search", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ terms }),
+        body: JSON.stringify({ terms, suffix }),
       }).then(r => r.json());
 
       renderResults(data);

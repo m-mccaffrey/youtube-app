@@ -90,6 +90,7 @@ def api_search():
 
     data = request.get_json()
     terms = [t.strip() for t in (data.get("terms") or "").splitlines() if t.strip()]
+    suffix = (data.get("suffix") or "").strip()
     if not terms:
         return jsonify({})
 
@@ -97,9 +98,10 @@ def api_search():
     results = {}
 
     for term in terms:
+        query = f"{term} {suffix}".strip() if suffix else term
         search_resp = youtube.search().list(
             part="id",
-            q=f"{term} live performance",
+            q=query,
             type="video",
             maxResults=25,
             order="relevance",
