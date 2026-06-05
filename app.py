@@ -10,6 +10,7 @@ import sqlite3
 import refresh
 from flask import Flask, jsonify, redirect, request, send_from_directory, url_for
 from googleapiclient.discovery import build
+from googleapiclient.errors import HttpError
 
 try:
     from google.auth.transport.requests import Request
@@ -96,55 +97,65 @@ def api_search():
 
     youtube = build("youtube", "v3", developerKey=api_key)
     results = {}
+    skipped = []
 
-    for term in terms:
+    for i, term in enumerate(terms):
         query = f"{term} {suffix}".strip() if suffix else term
-        search_resp = youtube.search().list(
-            part="id",
-            q=query,
-            type="video",
-            maxResults=25,
-            order="relevance",
-        ).execute()
+        try:
+            search_resp = youtube.search().list(
+                part="id",
+                q=query,
+                type="video",
+                maxResults=25,
+                order="relevance",
+            ).execute()
 
-        video_ids = [item["id"]["videoId"] for item in search_resp.get("items", [])]
-        if not video_ids:
-            results[term] = []
-            continue
-
-        videos_resp = youtube.videos().list(
-            part="snippet,contentDetails,statistics",
-            id=",".join(video_ids),
-        ).execute()
-
-        candidates = []
-        for item in videos_resp.get("items", []):
-            secs = parse_duration_seconds(item["contentDetails"]["duration"])
-            if secs == 0 or secs >= 600:
+            video_ids = [item["id"]["videoId"] for item in search_resp.get("items", [])]
+            if not video_ids:
+                results[term] = []
                 continue
-            snippet = item["snippet"]
-            stats = item.get("statistics", {})
-            thumbs = snippet.get("thumbnails", {})
-            thumbnail = (
-                thumbs.get("high", {}).get("url")
-                or thumbs.get("medium", {}).get("url")
-                or thumbs.get("default", {}).get("url")
-                or ""
-            )
-            candidates.append({
-                "id": item["id"],
-                "title": snippet.get("title", ""),
-                "channel": snippet.get("channelTitle", ""),
-                "duration": item["contentDetails"]["duration"],
-                "thumbnail": thumbnail,
-                "likes": int(stats.get("likeCount", 0)),
-                "views": int(stats.get("viewCount", 0)),
-            })
 
-        candidates.sort(key=lambda v: v["likes"], reverse=True)
-        results[term] = candidates[:5]
+            videos_resp = youtube.videos().list(
+                part="snippet,contentDetails,statistics",
+                id=",".join(video_ids),
+            ).execute()
 
-    return jsonify(results)
+            candidates = []
+            for item in videos_resp.get("items", []):
+                secs = parse_duration_seconds(item["contentDetails"]["duration"])
+                if secs == 0 or secs >= 600:
+                    continue
+                snippet = item["snippet"]
+                stats = item.get("statistics", {})
+                thumbs = snippet.get("thumbnails", {})
+                thumbnail = (
+                    thumbs.get("high", {}).get("url")
+                    or thumbs.get("medium", {}).get("url")
+                    or thumbs.get("default", {}).get("url")
+                    or ""
+                )
+                candidates.append({
+                    "id": item["id"],
+                    "title": snippet.get("title", ""),
+                    "channel": snippet.get("channelTitle", ""),
+                    "duration": item["contentDetails"]["duration"],
+                    "thumbnail": thumbnail,
+                    "likes": int(stats.get("likeCount", 0)),
+                    "views": int(stats.get("viewCount", 0)),
+                })
+
+            candidates.sort(key=lambda v: v["likes"], reverse=True)
+            results[term] = candidates[:5]
+
+        except HttpError as e:
+            if e.resp.status in (403, 429):
+                # Quota exceeded or rate limited — return what we have
+                skipped = terms[i:]
+                break
+            # Any other API error: record empty and continue
+            results[term] = []
+
+    return jsonify({"results": results, "skipped": skipped})
 
 
 @app.route("/api/add", methods=["POST"])

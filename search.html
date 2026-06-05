@@ -351,7 +351,7 @@
         body: JSON.stringify({ terms, suffix }),
       }).then(r => r.json());
 
-      renderResults(data);
+      renderResults(data.results, data.skipped);
     } catch (err) {
       resultsEl.innerHTML = `<p style="color:#bf6d6d;padding:1rem">Search failed: ${err.message}</p>`;
     } finally {
@@ -361,9 +361,21 @@
   }
 
   // ── render ───────────────────────────────────────────────────────────────
-  function renderResults(data) {
+  function renderResults(data, skipped = []) {
     const el = document.getElementById("results");
     el.innerHTML = "";
+
+    if (skipped.length) {
+      const warn = document.createElement("div");
+      warn.style.cssText = "background:#2a1a00;border:1px solid #4a3000;border-radius:6px;padding:0.7rem 1rem;margin-bottom:1.2rem;font-size:0.82rem;color:#c8902a;line-height:1.5";
+      warn.innerHTML = `<strong>YouTube quota reached</strong> — got results for ${Object.keys(data).length} term(s) before hitting the limit.<br>`
+        + `Skipped: <em>${skipped.map(t => escHtml(t)).join(", ")}</em><br>`
+        + `Quota resets at midnight Pacific. You can re-search just the skipped terms.`;
+      el.appendChild(warn);
+
+      // Pre-fill textarea with the skipped terms for easy retry
+      document.getElementById("terms-input").value = skipped.join("\n");
+    }
 
     for (const [term, videos] of Object.entries(data)) {
       const section = document.createElement("div");
