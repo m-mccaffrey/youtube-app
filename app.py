@@ -206,9 +206,10 @@ def auth_callback():
     os.environ["OAUTHLIB_INSECURE_TRANSPORT"] = "1"
     flow = Flow.from_client_secrets_file(
         CLIENT_SECRETS_PATH, scopes=SCOPES,
+        state=request.args.get("state"),
         redirect_uri=url_for("auth_callback", _external=True),
     )
-    flow.fetch_token(code=request.args.get("code"))
+    flow.fetch_token(authorization_response=request.url.replace("https://", "http://"))
     with open(TOKEN_PATH, "w") as f:
         f.write(flow.credentials.to_json())
     return redirect(url_for("search_page"))
