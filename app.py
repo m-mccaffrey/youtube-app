@@ -186,32 +186,35 @@ def api_auth_status():
 
 # ── OAuth flow ───────────────────────────────────────────────────────────────
 
+_oauth_flow = None  # kept in memory between /auth and /auth/callback
+
+
 @app.route("/auth")
 def auth():
+    global _oauth_flow
     if not OAUTH_AVAILABLE:
         return "Run: pip install google-auth-oauthlib", 501
     if not os.path.exists(CLIENT_SECRETS_PATH):
         return f"Place client_secrets.json in {STATIC_DIR}", 501
     os.environ["OAUTHLIB_INSECURE_TRANSPORT"] = "1"
-    flow = Flow.from_client_secrets_file(
+    _oauth_flow = Flow.from_client_secrets_file(
         CLIENT_SECRETS_PATH, scopes=SCOPES,
         redirect_uri=url_for("auth_callback", _external=True),
     )
-    auth_url, _ = flow.authorization_url(prompt="consent")
+    auth_url, _ = _oauth_flow.authorization_url(prompt="consent")
     return redirect(auth_url)
 
 
 @app.route("/auth/callback")
 def auth_callback():
+    global _oauth_flow
+    if not _oauth_flow:
+        return redirect(url_for("auth"))
     os.environ["OAUTHLIB_INSECURE_TRANSPORT"] = "1"
-    flow = Flow.from_client_secrets_file(
-        CLIENT_SECRETS_PATH, scopes=SCOPES,
-        state=request.args.get("state"),
-        redirect_uri=url_for("auth_callback", _external=True),
-    )
-    flow.fetch_token(authorization_response=request.url.replace("https://", "http://"))
+    _oauth_flow.fetch_token(authorization_response=request.url.replace("https://", "http://"))
     with open(TOKEN_PATH, "w") as f:
-        f.write(flow.credentials.to_json())
+        f.write(_oauth_flow.credentials.to_json())
+    _oauth_flow = None
     return redirect(url_for("search_page"))
 
 
