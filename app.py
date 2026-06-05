@@ -100,14 +100,15 @@ def api_search():
     skipped = []
 
     for i, term in enumerate(terms):
-        query = f"{term} {suffix}".strip() if suffix else term
+        base = f"{term} {suffix}".strip() if suffix else term
+        query = f"{base} +live"
         try:
             search_resp = youtube.search().list(
                 part="id",
                 q=query,
                 type="video",
                 maxResults=25,
-                order="relevance",
+                order="viewCount",
             ).execute()
 
             video_ids = [item["id"]["videoId"] for item in search_resp.get("items", [])]
